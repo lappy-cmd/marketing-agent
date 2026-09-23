@@ -94,9 +94,24 @@ export function validatePlan(plan: CarouselPlan, slideCount: number): string[] {
   return issues;
 }
 
+// The model occasionally returns an emoji as escaped text ("\ud83d\udd52")
+// instead of the character. Decode that, and drop anything that still isn't a
+// pictograph so letters never end up rendered where the emoji goes.
+function cleanEmoji(raw: string): string {
+  const decoded = raw
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+    .trim();
+  return /^\p{Extended_Pictographic}/u.test(decoded) && !/[A-Za-z0-9\\]/.test(decoded) ? decoded : "";
+}
+
+function cleanSlide(slide: Slide): Slide {
+  return { ...slide, emoji: cleanEmoji(slide.emoji) };
+}
+
 function normalize(plan: CarouselPlan): CarouselPlan {
   return {
     ...plan,
+    slides: plan.slides.map(cleanSlide),
     hookOptions: [...plan.hookOptions].sort((a, b) => b.score - a.score),
     hashtags: plan.hashtags.map((h) => "#" + h.replace(/^#+/, "").replace(/\s+/g, "")),
   };
@@ -131,5 +146,5 @@ export async function regenerateSlide(
     buildRegenerateSlidePrompt(input, plan, index, instruction),
     SlideSchema,
   );
-  return { ...slide, role };
+  return cleanSlide({ ...slide, role });
 }

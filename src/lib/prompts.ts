@@ -51,7 +51,7 @@ export function buildGeneratePrompt(input: BusinessInput): string {
       : `Use the "${input.format}" format.`;
   return `${describeInput(input)}
 
-Write an Instagram carousel with exactly ${input.slideCount} slides: 1 hook slide, ${input.slideCount - 2} value slide(s), and 1 CTA slide. ${format}`;
+Write an Instagram carousel with exactly ${input.slideCount} slides: 1 hook slide, ${input.slideCount - 2} value slide(s), and 1 CTA slide. ${format} If the hook or caption promises a count ("3 myths", "5 ways"), that count must be ${input.slideCount - 2}, the number of value slides.`;
 }
 
 export function buildRepairPrompt(

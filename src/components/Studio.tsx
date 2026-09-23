@@ -136,7 +136,8 @@ export default function Studio() {
       const blob = await zip.generateAsync({ type: "blob" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `${(input.businessName || "carousel").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-instagram.zip`;
+      const slug = (input.businessName || "carousel").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+      a.download = `${slug || "carousel"}-instagram.zip`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     } finally {

@@ -3,7 +3,7 @@ import type { Brand, TemplateId } from "./schemas";
 export const SLIDE_WIDTH = 1080;
 export const SLIDE_HEIGHT = 1350; // 4:5 — the tallest ratio Instagram shows in-feed
 
-export type FontFamily = "Inter" | "Playfair Display" | "Space Grotesk";
+export type FontFamily = "Inter" | "Montserrat" | "Playfair Display" | "Space Grotesk";
 
 export interface Theme {
   background: string; // any CSS background (solid or gradient)
@@ -80,7 +80,7 @@ export function buildTheme(brand: Brand): Theme {
         muted: withAlpha(text, 0.75),
         accent,
         accentText: readableOn(accent),
-        headlineFont: "Inter",
+        headlineFont: "Montserrat",
         headlineWeight: 800,
         bodyFont: "Inter",
         uppercaseKicker: true,

@@ -37,7 +37,7 @@ export function SlideEditor({
           <Input value={slide.kicker} onChange={(e) => set("kicker", e.target.value)} maxLength={40} />
         </Field>
         <Field label="Emoji">
-          <Input value={slide.emoji} onChange={(e) => set("emoji", e.target.value)} maxLength={8} className="text-center" />
+          <Input value={slide.emoji} onChange={(e) => set("emoji", e.target.value)} maxLength={8} className="text-center text-lg leading-5" />
         </Field>
       </div>
 

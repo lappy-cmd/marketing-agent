@@ -10,28 +10,43 @@ const font = (file: string) => readFile(join(fontDir, file));
 
 // Loaded once per server instance.
 const fontsPromise = Promise.all([
-  font("inter-latin-500-normal.woff"),
-  font("inter-latin-800-normal.woff"),
-  font("playfair-display-latin-700-normal.woff"),
-  font("space-grotesk-latin-500-normal.woff"),
-  font("space-grotesk-latin-700-normal.woff"),
-]).then(([inter500, inter800, playfair700, grotesk500, grotesk700]) => [
+  font("inter-500.ttf"),
+  font("playfair-display-700.ttf"),
+  font("space-grotesk-500.ttf"),
+  font("space-grotesk-700.ttf"),
+  font("montserrat-800.ttf"),
+]).then(([inter500, playfair700, grotesk500, grotesk700, montserrat800]) => [
   { name: "Inter", data: inter500, weight: 500 as const, style: "normal" as const },
-  { name: "Inter", data: inter800, weight: 800 as const, style: "normal" as const },
   { name: "Playfair Display", data: playfair700, weight: 700 as const, style: "normal" as const },
   { name: "Space Grotesk", data: grotesk500, weight: 500 as const, style: "normal" as const },
   { name: "Space Grotesk", data: grotesk700, weight: 700 as const, style: "normal" as const },
+  { name: "Montserrat", data: montserrat800, weight: 800 as const, style: "normal" as const },
 ]);
 
 const PAD = 88;
 
-// Satori mis-measures Space Grotesk's ligatures (ff, tt, fi, ...), leaving a
-// gap after the word. A zero-width non-joiner after f/t prevents them.
+const ZWNJ = String.fromCharCode(0x200c);
+
+// Clean up text for Satori:
+// - Straight apostrophes leave a visible gap in heavy weights; curly ones
+//   render correctly and are better typography anyway.
+// - Satori mis-measures Space Grotesk's ligatures (ff, tt, fi, ...), leaving a
+//   gap after the word. A zero-width non-joiner after f/t prevents them.
 function fixText(text: string, font: string): string {
-  return font === "Space Grotesk" ? text.replace(/([ft])(?=[fitl])/g, "$1‌") : text;
+  let out = text.replace(/(\w)'(\w)/g, "$1\u2019$2");
+  if (font === "Space Grotesk") out = out.replace(/([ft])(?=[fitl])/g, `$1${ZWNJ}`);
+  return out;
 }
 
 const CONTENT_WIDTH = SLIDE_WIDTH - PAD * 2;
+
+// Average glyph width as a fraction of font size, for headline auto-fit.
+const HEADLINE_CHAR_WIDTH: Record<Theme["headlineFont"], number> = {
+  Inter: 0.58,
+  Montserrat: 0.66,
+  "Playfair Display": 0.52,
+  "Space Grotesk": 0.58,
+};
 
 function Arrow({ color, size }: { color: string; size: number }) {
   return (
@@ -125,7 +140,7 @@ function Headline({ text, theme, max, maxHeight }: { text: string; theme: Theme;
     maxHeight,
     max,
     min: 44,
-    charWidth: theme.headlineFont === "Playfair Display" ? 0.52 : 0.58,
+    charWidth: HEADLINE_CHAR_WIDTH[theme.headlineFont],
   });
   return (
     <div
