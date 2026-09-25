@@ -1,28 +1,36 @@
 "use client";
 
 import { useState } from "react";
+import type { StudioPhoto } from "@/lib/photos";
 import type { CarouselPlan, Slide } from "@/lib/schemas";
 import { Button, Field, Input, Spinner, Textarea } from "./ui";
 
-const ROLE_LABELS: Record<Slide["role"], string> = { hook: "Hook", value: "Value", cta: "Call to action" };
+const ROLE_LABELS: Record<Slide["role"], string> = { hook: "Cover", value: "Content", cta: "Call to action" };
 const KICKER_LABELS: Record<Slide["role"], string> = { hook: "Tag", value: "Number / label", cta: "Button text" };
 
 export function SlideEditor({
   slide,
   index,
   hookOptions,
+  photos,
+  photoId,
   regenerating,
   onChange,
+  onPhotoChange,
   onRegenerate,
 }: {
   slide: Slide;
   index: number;
   hookOptions: CarouselPlan["hookOptions"];
+  photos: StudioPhoto[];
+  photoId: string | null;
   regenerating: boolean;
   onChange: (next: Slide) => void;
+  onPhotoChange: (photoId: string | null) => void;
   onRegenerate: (instruction?: string) => void;
 }) {
   const [instruction, setInstruction] = useState("");
+  const [chipsText, setChipsText] = useState(slide.chips.join(", "));
   const set = <K extends keyof Slide>(key: K, v: Slide[K]) => onChange({ ...slide, [key]: v });
   const words = slide.headline.trim().split(/\s+/).filter(Boolean).length;
 
@@ -31,6 +39,36 @@ export function SlideEditor({
       <div className="flex items-center gap-2 text-xs font-medium tracking-wide text-zinc-500 uppercase">
         Slide {index + 1} · {ROLE_LABELS[slide.role]}
       </div>
+
+      {photos.length > 0 ? (
+        <Field label="Photo">
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => onPhotoChange(null)}
+              className={`flex h-12 w-12 items-center justify-center rounded-md border text-[10px] font-medium ${
+                photoId === null ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-500 hover:border-zinc-400"
+              }`}
+            >
+              None
+            </button>
+            {photos.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => onPhotoChange(p.id)}
+                title={p.label}
+                className={`h-12 w-12 overflow-hidden rounded-md ring-2 ring-offset-1 transition ${
+                  photoId === p.id ? "ring-zinc-900" : "ring-transparent opacity-70 hover:opacity-100"
+                }`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={p.dataUrl} alt={p.label} className="h-full w-full object-cover" />
+              </button>
+            ))}
+          </div>
+        </Field>
+      ) : null}
 
       <div className="grid grid-cols-[1fr_80px] gap-3">
         <Field label={KICKER_LABELS[slide.role]}>
@@ -47,6 +85,25 @@ export function SlideEditor({
 
       <Field label="Body">
         <Textarea rows={3} value={slide.body} onChange={(e) => set("body", e.target.value)} maxLength={240} />
+      </Field>
+
+      <Field label="Info chips" hint="comma-separated, up to 3">
+        <Input
+          value={chipsText}
+          onChange={(e) => {
+            setChipsText(e.target.value);
+            set(
+              "chips",
+              e.target.value
+                .split(",")
+                .map((c) => c.trim())
+                .filter(Boolean)
+                .slice(0, 3),
+            );
+          }}
+          placeholder="📍 Bangsar, 💸 RM 25-40, ⭐ 4.7"
+          maxLength={90}
+        />
       </Field>
 
       {slide.role === "hook" && hookOptions.length > 1 ? (

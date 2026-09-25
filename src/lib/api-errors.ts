@@ -24,7 +24,7 @@ export function errorResponse(error: unknown): Response {
     console.error("Anthropic API error", error.status, error.message);
     return Response.json({ error: `AI provider error (${error.status ?? "network"}). Please try again.` }, { status: 502 });
   }
-  console.error(error);
+  console.error(error instanceof Error ? error.stack : error);
   const message =
     error instanceof Error && /api key|authentication/i.test(error.message)
       ? "Anthropic API key is missing. Set ANTHROPIC_API_KEY in .env.local and restart the dev server."

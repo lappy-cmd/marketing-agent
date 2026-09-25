@@ -3,7 +3,7 @@ import type { Brand, TemplateId } from "./schemas";
 export const SLIDE_WIDTH = 1080;
 export const SLIDE_HEIGHT = 1350; // 4:5 — the tallest ratio Instagram shows in-feed
 
-export type FontFamily = "Inter" | "Montserrat" | "Playfair Display" | "Space Grotesk";
+export type FontFamily = "Inter" | "Montserrat" | "Bricolage Grotesque" | "Poppins" | "Playfair Display";
 
 export interface Theme {
   background: string; // any CSS background (solid or gradient)
@@ -15,6 +15,12 @@ export interface Theme {
   headlineWeight: number;
   bodyFont: FontFamily;
   uppercaseKicker: boolean;
+  // How photos sit on the slide: edge-to-edge under a dark scrim, or as a
+  // rounded card with text below (editorial look).
+  photoStyle: "fullbleed" | "card";
+  glow: string; // soft color blobs behind text-only slides
+  chipBg: string;
+  stickerBg: string; // disc behind the emoji sticker
 }
 
 export const TEMPLATE_LABELS: Record<TemplateId, string> = {
@@ -84,6 +90,10 @@ export function buildTheme(brand: Brand): Theme {
         headlineWeight: 800,
         bodyFont: "Inter",
         uppercaseKicker: true,
+        photoStyle: "fullbleed",
+        glow: withAlpha(accent, 0.35),
+        chipBg: withAlpha(text, 0.14),
+        stickerBg: withAlpha(PAPER, 0.92),
       };
     }
     case "gradient": {
@@ -102,10 +112,14 @@ export function buildTheme(brand: Brand): Theme {
         muted: withAlpha(text, 0.82),
         accent: text,
         accentText: readableOn(text),
-        headlineFont: "Space Grotesk",
-        headlineWeight: 700,
-        bodyFont: "Space Grotesk",
+        headlineFont: "Bricolage Grotesque",
+        headlineWeight: 800,
+        bodyFont: "Inter",
         uppercaseKicker: true,
+        photoStyle: "fullbleed",
+        glow: withAlpha(text, 0.16),
+        chipBg: withAlpha(text, 0.16),
+        stickerBg: withAlpha(PAPER, 0.92),
       };
     }
     case "minimal": {
@@ -121,6 +135,10 @@ export function buildTheme(brand: Brand): Theme {
         headlineWeight: 700,
         bodyFont: "Inter",
         uppercaseKicker: false,
+        photoStyle: "card",
+        glow: withAlpha(primary, 0.14),
+        chipBg: withAlpha(accent, 0.1),
+        stickerBg: PAPER,
       };
     }
     case "dark": {
@@ -132,13 +150,32 @@ export function buildTheme(brand: Brand): Theme {
         muted: "#B4B4BE",
         accent,
         accentText: readableOn(accent),
-        headlineFont: "Space Grotesk",
+        headlineFont: "Poppins",
         headlineWeight: 700,
         bodyFont: "Inter",
         uppercaseKicker: true,
+        photoStyle: "fullbleed",
+        glow: withAlpha(accent, 0.3),
+        chipBg: withAlpha(PAPER, 0.1),
+        stickerBg: withAlpha(PAPER, 0.95),
       };
     }
   }
+}
+
+// Text drawn over a photo sits on a dark scrim, so it's always light; keep the
+// brand accent only if it stays legible there.
+export function onPhotoTheme(theme: Theme): Theme {
+  const scrim = "#141414";
+  const accent = legibleAccent(theme.accent, scrim, PAPER);
+  return {
+    ...theme,
+    text: PAPER,
+    muted: "rgba(255, 255, 255, 0.86)",
+    accent,
+    accentText: readableOn(accent),
+    chipBg: "rgba(255, 255, 255, 0.18)",
+  };
 }
 
 // Pick the largest font size (<= max) at which `text` fits in a box of

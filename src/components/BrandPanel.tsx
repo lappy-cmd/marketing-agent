@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { TEMPLATES, type Brand } from "@/lib/schemas";
 import { TEMPLATE_LABELS } from "@/lib/templates";
-import { Field, Input } from "./ui";
+import { Button, Field, Input, Segmented, Spinner } from "./ui";
 
 export const DEFAULT_BRAND: Brand = {
   template: "bold",
@@ -32,7 +32,23 @@ function TemplateSwatch({ id, brand }: { id: Brand["template"]; brand: Brand }) 
   );
 }
 
-export function BrandPanel({ value, onChange }: { value: Brand; onChange: (next: Brand) => void }) {
+export function BrandPanel({
+  value,
+  onChange,
+  autoColors,
+  onAutoColorsChange,
+  onSuggest,
+  suggesting,
+  reason,
+}: {
+  value: Brand;
+  onChange: (next: Brand) => void;
+  autoColors: boolean;
+  onAutoColorsChange: (auto: boolean) => void;
+  onSuggest: () => void;
+  suggesting: boolean;
+  reason?: string;
+}) {
   const [logoError, setLogoError] = useState<string | null>(null);
   const set = <K extends keyof Brand>(key: K, v: Brand[K]) => onChange({ ...value, [key]: v });
 
@@ -50,6 +66,29 @@ export function BrandPanel({ value, onChange }: { value: Brand; onChange: (next:
 
   return (
     <div className="flex flex-col gap-4">
+      <Field label="Colors & style">
+        <Segmented
+          value={autoColors ? "auto" : "custom"}
+          onChange={(v) => onAutoColorsChange(v === "auto")}
+          options={[
+            { value: "auto", label: "✨ Let AI pick" },
+            { value: "custom", label: "Choose myself" },
+          ]}
+        />
+      </Field>
+      <div className="flex items-start justify-between gap-3 rounded-lg bg-zinc-50 px-3 py-2.5">
+        <p className="text-xs leading-relaxed text-zinc-600">
+          {reason
+            ? reason
+            : autoColors
+              ? "The AI picks colors and a template from your description and photos when you generate."
+              : "Pick a template and colors below, or ask the AI for a suggestion."}
+        </p>
+        <Button variant="secondary" onClick={onSuggest} disabled={suggesting} className="shrink-0 px-3 py-1.5 text-xs">
+          {suggesting ? <Spinner className="h-3 w-3" /> : "✨"} Suggest now
+        </Button>
+      </div>
+
       <Field label="Template">
         <div className="grid grid-cols-4 gap-2">
           {TEMPLATES.map((t) => (

@@ -10,7 +10,10 @@ export async function POST(request: Request) {
     if (req.brand.logoDataUrl && req.brand.logoDataUrl.length > MAX_LOGO_CHARS) {
       return Response.json({ error: "Logo is too large (max 1 MB)." }, { status: 413 });
     }
-    return await renderSlide(req);
+    // ImageResponse renders lazily while streaming; buffer it here so a layout
+    // error becomes a proper 500 instead of a dropped connection.
+    const png = await (await renderSlide(req)).arrayBuffer();
+    return new Response(png, { headers: { "Content-Type": "image/png", "Cache-Control": "no-store" } });
   } catch (error) {
     return errorResponse(error);
   }

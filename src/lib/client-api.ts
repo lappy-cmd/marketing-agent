@@ -1,4 +1,11 @@
-import type { Brand, BusinessInput, CarouselPlan, Slide } from "./schemas";
+import type {
+  BusinessInput,
+  CarouselPlan,
+  Palette,
+  PhotoInput,
+  RenderRequest,
+  Slide,
+} from "./schemas";
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -11,8 +18,16 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return data as T;
 }
 
-export async function generatePlan(input: BusinessInput): Promise<CarouselPlan> {
-  return (await postJson<{ plan: CarouselPlan }>("/api/generate", input)).plan;
+export async function researchTopic(input: BusinessInput, photoLabels: string[]): Promise<string> {
+  return (await postJson<{ notes: string }>("/api/research", { input, photoLabels })).notes;
+}
+
+export async function generatePlan(input: BusinessInput, photos: PhotoInput[], research?: string): Promise<CarouselPlan> {
+  return (await postJson<{ plan: CarouselPlan }>("/api/generate", { input, photos, research })).plan;
+}
+
+export async function suggestPalette(input: Partial<BusinessInput>, photos: PhotoInput[]): Promise<Palette> {
+  return (await postJson<{ palette: Palette }>("/api/suggest-palette", { input, photos })).palette;
 }
 
 export async function regenerateSlide(
@@ -25,13 +40,7 @@ export async function regenerateSlide(
 }
 
 // Returns an object URL for the rendered PNG; the caller owns revoking it.
-export async function renderSlideImage(params: {
-  slide: Slide;
-  index: number;
-  total: number;
-  brand: Brand;
-  businessName: string;
-}): Promise<string> {
+export async function renderSlideImage(params: RenderRequest): Promise<string> {
   const res = await fetch("/api/render", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

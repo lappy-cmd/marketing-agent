@@ -2,25 +2,55 @@
 
 import JSZip from "jszip";
 import { useEffect, useRef, useState } from "react";
-import { generatePlan, regenerateSlide, renderSlideImage } from "@/lib/client-api";
-import { BrandSchema, BusinessInputSchema, type Brand, type BusinessInput, type CarouselPlan, type Slide } from "@/lib/schemas";
+import { generatePlan, regenerateSlide, renderSlideImage, researchTopic, suggestPalette } from "@/lib/client-api";
+import { photoAspect, type StudioPhoto } from "@/lib/photos";
+import {
+  BrandSchema,
+  BusinessInputSchema,
+  POST_TYPE_INFO,
+  SlideSchema,
+  type Brand,
+  type BusinessInput,
+  type CarouselPlan,
+  type Palette,
+  type PhotoInput,
+  type RenderImage,
+  type Slide,
+} from "@/lib/schemas";
 import { DEFAULT_BRAND, BrandPanel } from "./BrandPanel";
 import { BusinessForm, EMPTY_INPUT, EXAMPLE_INPUT } from "./BusinessForm";
 import { CaptionPanel, fullCaption } from "./CaptionPanel";
 import { CarouselPreview } from "./CarouselPreview";
+import { PhotoUploader } from "./PhotoUploader";
 import { SlideEditor } from "./SlideEditor";
 import { Button, Card, Spinner } from "./ui";
 
-const STORAGE_KEY = "marketing-agent:v1";
+const STORAGE_KEY = "marketing-agent:v2";
 const RENDER_DEBOUNCE_MS = 350;
 
+// Slides reference photos by id on the client, so removing or reordering
+// photos never points a slide at the wrong image.
+type StudioSlide = Slide & { photoId: string | null };
+type StudioPlan = Omit<CarouselPlan, "slides"> & { slides: StudioSlide[] };
+type Phase = "idle" | "researching" | "writing";
+
 function cleanInput(input: BusinessInput): BusinessInput {
-  return { ...input, features: input.features.map((f) => f.trim()).filter(Boolean), website: input.website?.trim() || undefined };
+  return {
+    ...input,
+    features: input.features.map((f) => f.trim()).filter(Boolean),
+    topic: input.topic?.trim() || undefined,
+    website: input.website?.trim() || undefined,
+  };
 }
+
+const toPhotoInputs = (photos: StudioPhoto[]): PhotoInput[] =>
+  photos.map((p) => ({ dataUrl: p.dataUrl, label: p.label.trim() || undefined }));
+
+const toRenderImage = (p: StudioPhoto): RenderImage => ({ src: p.dataUrl, aspect: photoAspect(p) });
 
 // Restore the last business + brand (per-browser convenience only). Studio is
 // rendered client-only (see StudioLoader), so localStorage is available here.
-function loadSaved(): { input?: Partial<BusinessInput>; brand?: Partial<Brand> } {
+function loadSaved(): { input?: Partial<BusinessInput>; brand?: Partial<Brand>; autoColors?: boolean } {
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") ?? {};
   } catch {
@@ -31,11 +61,16 @@ function loadSaved(): { input?: Partial<BusinessInput>; brand?: Partial<Brand> }
 export default function Studio() {
   const [input, setInput] = useState<BusinessInput>(() => ({ ...EMPTY_INPUT, ...loadSaved().input }));
   const [brand, setBrand] = useState<Brand>(() => ({ ...DEFAULT_BRAND, ...loadSaved().brand }));
-  const [plan, setPlan] = useState<CarouselPlan | null>(null);
+  const [autoColors, setAutoColors] = useState<boolean>(() => loadSaved().autoColors ?? true);
+  const [paletteReason, setPaletteReason] = useState<string>();
+  const [photos, setPhotos] = useState<StudioPhoto[]>([]);
+  const [plan, setPlan] = useState<StudioPlan | null>(null);
   const [images, setImages] = useState<(string | null)[]>([]);
   const [selected, setSelected] = useState(0);
-  const [generating, setGenerating] = useState(false);
+  const [phase, setPhase] = useState<Phase>("idle");
   const [regenerating, setRegenerating] = useState<number | null>(null);
+  const [editorVersion, setEditorVersion] = useState(0);
+  const [suggesting, setSuggesting] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,26 +81,52 @@ export default function Studio() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ input, brand }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ input, brand, autoColors }));
     } catch {}
-  }, [input, brand]);
+  }, [input, brand, autoColors]);
 
-  // Re-render any slide whose content or branding changed, debounced so typing
-  // in the editor doesn't fire a request per keystroke.
+  // Re-render any slide whose content, photo or branding changed, debounced so
+  // typing in the editor doesn't fire a request per keystroke.
   useEffect(() => {
     if (!plan || !BrandSchema.safeParse(brand).success) return;
     const total = plan.slides.length;
     const businessName = input.businessName || "Your brand";
+    const byId = new Map(photos.map((p) => [p.id, p]));
+
+    // A cover without its own photo shows a collage of the post's photos.
+    const used = plan.slides.map((s) => s.photoId).filter((id): id is string => !!id && byId.has(id));
+    const collagePhotos = [...used, ...photos.map((p) => p.id).filter((id) => !used.includes(id))]
+      .slice(0, 3)
+      .map((id) => byId.get(id)!);
 
     const timer = setTimeout(() => {
-      plan.slides.forEach((slide, index) => {
-        const key = JSON.stringify({ slide, total, brand, businessName });
+      plan.slides.forEach(({ photoId, ...slide }, index) => {
+        const photo = photoId ? byId.get(photoId) : undefined;
+        const collage = slide.role === "hook" && !photo ? collagePhotos : [];
+        const key = JSON.stringify({
+          slide,
+          photo: photo?.id,
+          collage: collage.map((p) => p.id),
+          total,
+          brand,
+          businessName,
+          postType: plan.postType,
+        });
         if (renderedKeys.current[index] === key) return;
         renderedKeys.current[index] = key;
         const version = (renderVersions.current[index] ?? 0) + 1;
         renderVersions.current[index] = version;
 
-        renderSlideImage({ slide, index, total, brand, businessName })
+        renderSlideImage({
+          slide,
+          index,
+          total,
+          brand,
+          businessName,
+          postType: plan.postType,
+          image: photo ? toRenderImage(photo) : undefined,
+          collage: collage.length >= 2 ? collage.map(toRenderImage) : undefined,
+        })
           .then((url) => {
             if (renderVersions.current[index] !== version) return URL.revokeObjectURL(url);
             setImages((prev) => {
@@ -82,7 +143,39 @@ export default function Studio() {
       });
     }, RENDER_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [plan, brand, input.businessName]);
+  }, [plan, brand, input.businessName, photos]);
+
+  function applyPalette(p: Palette) {
+    setBrand((b) => ({ ...b, primaryColor: p.primaryColor, secondaryColor: p.secondaryColor, template: p.template }));
+    setPaletteReason(p.reason);
+  }
+
+  // Picking colors or a template by hand switches off AI colors.
+  function onBrandChange(next: Brand) {
+    if (
+      next.primaryColor !== brand.primaryColor ||
+      next.secondaryColor !== brand.secondaryColor ||
+      next.template !== brand.template
+    ) {
+      setAutoColors(false);
+      setPaletteReason(undefined);
+    }
+    setBrand(next);
+  }
+
+  async function onSuggest() {
+    setError(null);
+    setSuggesting(true);
+    try {
+      applyPalette(await suggestPalette(cleanInput(input), toPhotoInputs(photos)));
+      // Lock the suggestion in so the next generation doesn't replace it.
+      setAutoColors(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSuggesting(false);
+    }
+  }
 
   async function onGenerate() {
     setError(null);
@@ -91,23 +184,36 @@ export default function Studio() {
       setError("Fill in the business name, industry, description, audience and at least one feature.");
       return;
     }
-    setGenerating(true);
+    const data = parsed.data;
+    const photosAtStart = photos;
     try {
-      const next = await generatePlan(parsed.data);
+      let notes: string | undefined;
+      if (data.topic) {
+        setPhase("researching");
+        notes = await researchTopic(data, photosAtStart.map((p) => p.label.trim()).filter(Boolean));
+      }
+      setPhase("writing");
+      const next = await generatePlan(data, toPhotoInputs(photosAtStart), notes);
+
       images.forEach((url) => url && URL.revokeObjectURL(url));
       renderedKeys.current = [];
       setImages(next.slides.map(() => null));
       setSelected(0);
-      setPlan(next);
+      setEditorVersion((v) => v + 1);
+      if (autoColors) applyPalette(next.palette);
+      setPlan({
+        ...next,
+        slides: next.slides.map((s) => ({ ...s, photoId: photosAtStart[s.imageIndex]?.id ?? null })),
+      });
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setGenerating(false);
+      setPhase("idle");
     }
   }
 
-  function updateSlide(index: number, slide: Slide) {
-    setPlan((p) => (p ? { ...p, slides: p.slides.map((s, i) => (i === index ? slide : s)) } : p));
+  function updateSlide(index: number, slide: Partial<StudioSlide>) {
+    setPlan((p) => (p ? { ...p, slides: p.slides.map((s, i) => (i === index ? { ...s, ...slide } : s)) } : p));
   }
 
   async function onRegenerate(index: number, instruction?: string) {
@@ -115,8 +221,11 @@ export default function Studio() {
     setError(null);
     setRegenerating(index);
     try {
-      const slide = await regenerateSlide(cleanInput(input), plan, index, instruction);
+      // Parsing strips the client-only photoId.
+      const apiPlan: CarouselPlan = { ...plan, slides: plan.slides.map((s) => SlideSchema.parse(s)) };
+      const slide = await regenerateSlide(cleanInput(input), apiPlan, index, instruction);
       updateSlide(index, slide);
+      setEditorVersion((v) => v + 1);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -145,14 +254,16 @@ export default function Studio() {
     }
   }
 
+  const busy = phase !== "idle";
   const allRendered = images.length > 0 && images.every(Boolean);
+  const current = plan?.slides[selected];
 
   return (
     <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[440px_1fr]">
       {/* Left: inputs */}
       <div className="flex flex-col gap-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:pb-2">
         <Card
-          title="Your business"
+          title="Your business & post"
           action={
             <button type="button" onClick={() => setInput(EXAMPLE_INPUT)} className="text-xs font-medium text-zinc-500 hover:text-zinc-900">
               Fill example
@@ -161,13 +272,27 @@ export default function Studio() {
         >
           <BusinessForm value={input} onChange={setInput} />
         </Card>
-        <Card title="Brand style">
-          <BrandPanel value={brand} onChange={setBrand} />
+        <Card title="Photos">
+          <PhotoUploader photos={photos} onChange={setPhotos} />
         </Card>
-        <Button onClick={onGenerate} disabled={generating} className="py-3 text-base">
-          {generating ? (
+        <Card title="Brand style">
+          <BrandPanel
+            value={brand}
+            onChange={onBrandChange}
+            autoColors={autoColors}
+            onAutoColorsChange={(auto) => {
+              setAutoColors(auto);
+              if (!auto) setPaletteReason(undefined);
+            }}
+            onSuggest={onSuggest}
+            suggesting={suggesting}
+            reason={paletteReason}
+          />
+        </Card>
+        <Button onClick={onGenerate} disabled={busy} className="py-3 text-base">
+          {busy ? (
             <>
-              <Spinner /> Writing your carousel…
+              <Spinner /> {phase === "researching" ? "Researching…" : "Writing your carousel…"}
             </>
           ) : plan ? (
             "Generate a new carousel"
@@ -188,12 +313,12 @@ export default function Studio() {
           </div>
         ) : null}
 
-        {!plan ? (
-          <EmptyState generating={generating} />
+        {!plan || !current ? (
+          <EmptyState phase={phase} topic={input.topic} />
         ) : (
           <>
             <Card
-              title={`Carousel · ${plan.format.replace(/_/g, " ")}`}
+              title={`Carousel · ${POST_TYPE_INFO[plan.postType].label}`}
               action={
                 <Button onClick={onDownload} disabled={!allRendered || downloading}>
                   {downloading ? <Spinner /> : "↓"} Download ZIP
@@ -203,12 +328,15 @@ export default function Studio() {
               <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,440px)_1fr]">
                 <CarouselPreview images={images} selected={selected} onSelect={setSelected} />
                 <SlideEditor
-                  key={selected}
-                  slide={plan.slides[selected]}
+                  key={`${selected}-${editorVersion}`}
+                  slide={current}
                   index={selected}
                   hookOptions={plan.hookOptions}
+                  photos={photos}
+                  photoId={current.photoId && photos.some((p) => p.id === current.photoId) ? current.photoId : null}
                   regenerating={regenerating === selected}
                   onChange={(s) => updateSlide(selected, s)}
+                  onPhotoChange={(photoId) => updateSlide(selected, { photoId })}
                   onRegenerate={(instruction) => onRegenerate(selected, instruction)}
                 />
               </div>
@@ -227,15 +355,19 @@ export default function Studio() {
   );
 }
 
-function EmptyState({ generating }: { generating: boolean }) {
+function EmptyState({ phase, topic }: { phase: Phase; topic?: string }) {
   return (
     <div className="flex min-h-[520px] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-zinc-300 bg-white p-10 text-center">
-      {generating ? (
+      {phase !== "idle" ? (
         <>
           <Spinner className="h-6 w-6 text-zinc-500" />
           <div>
-            <p className="font-medium text-zinc-900">Writing hooks, slides and caption…</p>
-            <p className="mt-1 text-sm text-zinc-500">This usually takes 20–40 seconds.</p>
+            <p className="font-medium text-zinc-900">
+              {phase === "researching" ? `Researching “${topic}” on the web…` : "Writing hooks, slides and caption…"}
+            </p>
+            <p className="mt-1 text-sm text-zinc-500">
+              {phase === "researching" ? "Step 1 of 2 · finding real, current picks" : "Usually 15–30 seconds"}
+            </p>
           </div>
         </>
       ) : (
@@ -248,8 +380,8 @@ function EmptyState({ generating }: { generating: boolean }) {
           <div>
             <p className="font-medium text-zinc-900">Your carousel will appear here</p>
             <p className="mt-1 max-w-sm text-sm text-zinc-500">
-              Describe your business on the left and get a 3–5 slide Instagram post built to earn saves and shares: a
-              scroll-stopping hook, value slides and a clear call to action.
+              Describe your business, pick a post type and add photos. You&apos;ll get a ready-to-post Instagram carousel
+              with a scroll-stopping cover, content slides and a call to action.
             </p>
           </div>
         </>
