@@ -1,5 +1,11 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { POST_TYPE_INFO, type BusinessInput, type CarouselPlan, type PhotoInput } from "./schemas";
+import {
+  POST_TYPE_INFO,
+  type BusinessInput,
+  type CarouselPlan,
+  type EditPostRequest,
+  type PhotoInput,
+} from "./schemas";
 
 export const SYSTEM_PROMPT = `You are a senior social media strategist who writes Instagram carousel posts that perform well in the feed. You write for small businesses, apps and new ideas, turning what they offer into posts people save and share.
 
@@ -21,6 +27,13 @@ The user may attach photos (numbered from 0). Look at each one, including any te
 - The hook only gets a photo that isn't tied to one specific item. Otherwise leave the hook at -1: it automatically shows a collage of the post's other photos.
 - App screenshots or logos go on the CTA slide (or on the matching feature slide in a showcase).
 - Use each photo at most once. Use -1 when no photo fits; never invent photos.
+
+## Image search
+The app can look for an image online for slides that have no uploaded photo. For every slide, set imageKind and imageQuery:
+- "web": the slide is about one named real place, dish or product. The query is its name plus its location and what to show ("Burger On 16 Kuala Lumpur burger").
+- "stock": the slide is about a general idea. The query describes one concrete scene in 3-6 plain words ("friends sharing food at night market"). No brand names, no text or logos.
+- "none" with an empty query: slides that already have an uploaded photo, CTA slides for apps, and slides where a photo would not help.
+- Hook: "none" when at least two other slides will have an image (it shows a collage of them); otherwise "stock".
 
 ## Colors
 Pick a palette for the post in palette: primaryColor (dominant color) and secondaryColor (accent that pops against it), as hex. Base it on the photos' colorway and the brand's vibe (industry, voice, audience), so the slides look like one feed. Choose the template that suits it: "bold" (solid brand color), "gradient" (two-color blend), "minimal" (light editorial), "dark" (near-black with accent).
@@ -95,7 +108,7 @@ function taskText(input: BusinessInput, research?: string): string {
   const notes = research ? `\n\nResearch notes (the only source for specific names, prices and ratings):\n${research}` : "";
   return `${describeInput(input)}${notes}
 
-Write an Instagram carousel with exactly ${input.slideCount} slides: 1 hook slide, ${values} value slide(s), and 1 CTA slide. ${type} If the hook or caption promises a count ("5 spots", "3 myths"), that count must be ${values}, the number of value slides.`;
+Write an Instagram carousel with exactly ${input.slideCount} slides: 1 hook slide, ${values} value slide(s), and 1 CTA slide. ${type} If more features are listed than fit the value slides, use the ones that best serve this post's topic and goal instead of mentioning all of them. If the hook or caption promises a count ("5 spots", "3 myths"), that count must be ${values}, the number of value slides.`;
 }
 
 export function buildGenerateContent(
@@ -172,4 +185,47 @@ ${plan.slides.map((s, i) => `Slide ${i + 1} [${s.role}] ${s.kicker} | ${s.headli
 Rewrite slide ${index + 1} (role "${slide.role}") so it's stronger and fits with the other slides. Keep its role, keep any real names/facts it contains, and follow the slide rules for that role. Set imageIndex to ${slide.imageIndex}.${
     instruction ? `\nThe user asked for this change: ${instruction}` : ""
   }`;
+}
+
+export function buildEditPostPrompt({ input, plan, brand, uploads, slideImages, instruction }: EditPostRequest): string {
+  const slides = plan.slides
+    .map((s, i) => {
+      const image = slideImages[i];
+      return `Slide ${i + 1} (index ${i}) [${s.role}]
+  kicker: ${s.kicker}
+  headline: ${s.headline}
+  body: ${s.body}
+  emoji: ${s.emoji}
+  chips: ${JSON.stringify(s.chips)}
+  image: ${image.source === "none" ? "none" : `${image.source} (${image.label})`}`;
+    })
+    .join("\n");
+  const photos = uploads.length ? uploads.map((label, i) => `${i}: ${label || "(no label)"}`).join("\n") : "(none)";
+
+  return `${describeInput(input)}
+
+Here is the current post (post type: ${plan.postType}).
+
+${slides}
+
+Colors: primary ${brand.primaryColor}, accent ${brand.secondaryColor}, template "${brand.template}".
+
+Caption:
+${plan.caption}
+
+Hashtags: ${plan.hashtags.join(" ")}
+
+Uploaded photos, by index:
+${photos}
+
+The user asked for this change: ${instruction}
+
+Make that change and nothing else:
+- The user counts slides from 1, so "slide 2" is index 1. Use the same numbering as the user in summary.
+- List a slide in slides only if something on it changes, and copy the fields that stay the same exactly as they are.
+- A slide's image: "keep" unless the user asked to change it. "remove" takes it off, "upload" switches to one of the uploaded photos (set uploadIndex), "find" searches online for a new one (set query and kind following the Image search rules). You only see image labels, not the pictures.
+- Set change to false on palette, caption and hashtags unless the instruction calls for changing them. When change is false their other fields are ignored.
+- Anything you rewrite still follows the slide, color, caption and hashtag rules.
+- Slides can't be added, removed or reordered. If the user asks for that, or for anything else you can't do, say so in summary and change nothing.
+- summary: one short sentence telling the user what you changed.`;
 }

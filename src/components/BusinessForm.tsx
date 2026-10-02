@@ -1,6 +1,6 @@
 "use client";
 
-import { GOALS, MAX_SLIDES, MIN_SLIDES, POST_TYPE_INFO, POST_TYPES, VOICES, type BusinessInput } from "@/lib/schemas";
+import { GOALS, MAX_FEATURES, MAX_SLIDES, MIN_SLIDES, POST_TYPE_INFO, POST_TYPES, VOICES, type BusinessInput } from "@/lib/schemas";
 import { Field, Input, Segmented, Select, Textarea } from "./ui";
 
 export const EMPTY_INPUT: BusinessInput = {
@@ -85,7 +85,7 @@ export function BusinessForm({
         />
       </Field>
 
-      <Field label="Features to promote" hint="1–3">
+      <Field label="Features to promote" hint={`1–${MAX_FEATURES}`}>
         <div className="flex flex-col gap-2">
           {value.features.map((f, i) => (
             <div key={i} className="flex gap-2">
@@ -102,7 +102,7 @@ export function BusinessForm({
               ) : null}
             </div>
           ))}
-          {value.features.length < 3 ? (
+          {value.features.length < MAX_FEATURES ? (
             <button
               type="button"
               onClick={() => set("features", [...value.features, ""])}

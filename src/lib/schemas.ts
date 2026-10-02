@@ -30,13 +30,14 @@ export const POST_TYPE_INFO: Record<PostType, { label: string; emoji: string; ex
 export const MIN_SLIDES = 3;
 export const MAX_SLIDES = 10;
 export const MAX_PHOTOS = 8;
+export const MAX_FEATURES = 8;
 
 export const BusinessInputSchema = z.object({
   businessName: z.string().trim().min(1).max(80),
   industry: z.string().trim().min(1).max(80),
   description: z.string().trim().min(1).max(500),
   audience: z.string().trim().min(1).max(300),
-  features: z.array(z.string().trim().min(1).max(200)).min(1).max(3),
+  features: z.array(z.string().trim().min(1).max(200)).min(1).max(MAX_FEATURES),
   goal: z.enum(GOALS),
   voice: z.enum(VOICES),
   slideCount: z.number().int().min(MIN_SLIDES).max(MAX_SLIDES),
@@ -75,6 +76,11 @@ export type Brand = z.infer<typeof BrandSchema>;
 // Length rules are enforced in content-engine.ts (validatePlan), not in the
 // schema, so the model gets a specific repair message instead of a parse error.
 
+// Where a found image comes from: a stock library or open-web image search.
+export const IMAGE_SOURCES = ["stock", "web"] as const;
+export type ImageSource = (typeof IMAGE_SOURCES)[number];
+export const IMAGE_KINDS = ["none", ...IMAGE_SOURCES] as const;
+
 export const SlideSchema = z.object({
   role: z.enum(["hook", "value", "cta"]),
   kicker: z
@@ -89,6 +95,10 @@ export const SlideSchema = z.object({
     .array(z.string())
     .describe("0-3 short info tags shown as pills, each under 22 characters, e.g. '📍 Bangsar', 'RM 25-40', '★ 4.7'."),
   imageIndex: z.number().describe("Index of the uploaded photo to show on this slide, or -1 for none."),
+  imageQuery: z.string().describe("Search query for an image that fits this slide, or empty string."),
+  imageKind: z
+    .enum(IMAGE_KINDS)
+    .describe("'web' for one named real place/product, 'stock' for a general idea, 'none' for no image."),
 });
 export type Slide = z.infer<typeof SlideSchema>;
 
@@ -99,6 +109,48 @@ export const PaletteSchema = z.object({
   reason: z.string().describe("One short sentence on why these colors fit."),
 });
 export type Palette = z.infer<typeof PaletteSchema>;
+
+// What the model returns for an "Ask AI to change…" instruction. Structured
+// output has no optional fields, so each post-level part carries a `change`
+// flag; normalizeEdit (post-edit.ts) turns this into a PostEdit.
+export const PostEditOutputSchema = z.object({
+  summary: z.string().describe("One short sentence saying what was changed."),
+  slides: z
+    .array(
+      z.object({
+        index: z.number().describe("0-based index of the slide being changed."),
+        kicker: z.string(),
+        headline: z.string(),
+        body: z.string(),
+        emoji: z.string(),
+        chips: z.array(z.string()),
+        image: z.object({
+          action: z
+            .enum(["keep", "remove", "upload", "find"])
+            .describe("'keep' the current image, 'remove' it, use an 'upload', or 'find' a new one online."),
+          uploadIndex: z.number().describe("For 'upload': index of the uploaded photo. Otherwise -1."),
+          query: z.string().describe("For 'find': the image search query. Otherwise empty string."),
+          kind: z.enum(IMAGE_SOURCES),
+        }),
+      }),
+    )
+    .describe("Only the slides that change. Fields that stay the same are copied exactly."),
+  palette: z.object({
+    change: z.boolean(),
+    primaryColor: z.string(),
+    secondaryColor: z.string(),
+    template: z.enum(TEMPLATES),
+  }),
+  caption: z.object({ change: z.boolean(), text: z.string() }),
+  hashtags: z.object({ change: z.boolean(), tags: z.array(z.string()) }),
+});
+export type PostEditOutput = z.infer<typeof PostEditOutputSchema>;
+
+export type PostEdit = Pick<PostEditOutput, "summary" | "slides"> & {
+  palette: Pick<Palette, "primaryColor" | "secondaryColor" | "template"> | null;
+  caption: string | null;
+  hashtags: string[] | null;
+};
 
 export const CarouselPlanSchema = z.object({
   postType: z.enum(POST_TYPES),
@@ -143,6 +195,42 @@ export const RegenerateSlideRequestSchema = z.object({
   index: z.number().int().min(0).max(MAX_SLIDES - 1),
   instruction: z.string().max(300).optional(),
 });
+
+export const EditPostRequestSchema = z.object({
+  input: BusinessInputSchema,
+  plan: CarouselPlanSchema,
+  brand: BrandSchema.pick({ template: true, primaryColor: true, secondaryColor: true }),
+  // Labels of the uploaded photos, by index.
+  uploads: z.array(z.string().max(100)).max(MAX_PHOTOS),
+  // What each slide currently shows, one entry per slide.
+  slideImages: z
+    .array(z.object({ source: z.enum(["none", "upload", "found"]), label: z.string().max(300) }))
+    .max(MAX_SLIDES),
+  instruction: z.string().trim().min(1).max(500),
+});
+export type EditPostRequest = z.infer<typeof EditPostRequestSchema>;
+
+// ---------- Found images ----------
+
+export const ImageCandidateSchema = z.object({
+  url: z.string(), // full-size image
+  thumbUrl: z.string(),
+  width: z.number(), // 0 when the source doesn't report it
+  height: z.number(),
+  kind: z.enum(IMAGE_SOURCES),
+  sourceName: z.string(), // "Pexels" or the page's domain
+  author: z.string(), // photographer, or ""
+  pageUrl: z.string(), // where the image came from
+});
+export type ImageCandidate = z.infer<typeof ImageCandidateSchema>;
+export type ImageSources = Record<ImageSource, boolean>;
+
+export const FindImagesRequestSchema = z.object({
+  query: z.string().trim().min(1).max(200),
+  kind: z.enum(IMAGE_SOURCES),
+});
+
+export const ImportImageRequestSchema = z.object({ url: z.string().max(2000) });
 
 const RenderImageSchema = z.object({
   src: z.string().regex(/^data:image\/(jpeg|png|svg\+xml);base64,/),

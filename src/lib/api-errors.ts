@@ -2,6 +2,8 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { ZodError } from "zod";
 import { ContentEngineError } from "./content-engine";
+import { ImageSearchError } from "./image-search";
+import { ImageFetchError } from "./safe-fetch";
 
 // Turn anything thrown in a route into a JSON error the UI can show.
 export function errorResponse(error: unknown): Response {
@@ -10,6 +12,12 @@ export function errorResponse(error: unknown): Response {
   }
   if (error instanceof ContentEngineError) {
     return Response.json({ error: error.message }, { status: 502 });
+  }
+  if (error instanceof ImageSearchError) {
+    return Response.json({ error: error.message }, { status: error.status });
+  }
+  if (error instanceof ImageFetchError) {
+    return Response.json({ error: error.message }, { status: 422 });
   }
   if (error instanceof Anthropic.AuthenticationError) {
     return Response.json(

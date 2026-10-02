@@ -2,7 +2,10 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { z } from "zod";
+import { cleanChips, cleanEmoji, cleanHashtags, cleanPalette } from "./clean";
+import { normalizeEdit } from "./post-edit";
 import {
+  buildEditPostPrompt,
   buildGenerateContent,
   buildPaletteContent,
   buildRegenerateSlidePrompt,
@@ -13,13 +16,15 @@ import {
 } from "./prompts";
 import {
   CarouselPlanSchema,
-  HEX,
   PaletteSchema,
+  PostEditOutputSchema,
   SlideSchema,
   type BusinessInput,
   type CarouselPlan,
+  type EditPostRequest,
   type Palette,
   type PhotoInput,
+  type PostEdit,
   type Slide,
 } from "./schemas";
 
@@ -155,39 +160,16 @@ export function validatePlan(plan: CarouselPlan, slideCount: number): string[] {
 
 // ---------- Normalization ----------
 
-// The model occasionally returns an emoji as escaped text ("🕒")
-// instead of the character. Decode that, and drop anything that still isn't a
-// pictograph so letters never end up rendered where the emoji goes.
-function cleanEmoji(raw: string): string {
-  const decoded = raw
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
-    .trim();
-  return /^\p{Extended_Pictographic}/u.test(decoded) && !/[A-Za-z0-9\\]/.test(decoded) ? decoded : "";
-}
-
 function cleanSlide(slide: Slide, photoCount: number): Slide {
   const idx = Number.isInteger(slide.imageIndex) ? slide.imageIndex : -1;
+  const imageQuery = slide.imageQuery.trim().slice(0, 200);
   return {
     ...slide,
     emoji: cleanEmoji(slide.emoji),
-    chips: slide.chips.map((c) => c.trim()).filter(Boolean).slice(0, 3),
+    chips: cleanChips(slide.chips),
     imageIndex: idx >= 0 && idx < photoCount ? idx : -1,
-  };
-}
-
-const DEFAULT_PALETTE: Palette = {
-  primaryColor: "#1F3D2B",
-  secondaryColor: "#F2B84B",
-  template: "bold",
-  reason: "",
-};
-
-function cleanPalette(p: Palette): Palette {
-  const up = (c: string) => c.trim().toUpperCase();
-  return {
-    ...p,
-    primaryColor: HEX.test(p.primaryColor.trim()) ? up(p.primaryColor) : DEFAULT_PALETTE.primaryColor,
-    secondaryColor: HEX.test(p.secondaryColor.trim()) ? up(p.secondaryColor) : DEFAULT_PALETTE.secondaryColor,
+    imageQuery,
+    imageKind: imageQuery ? slide.imageKind : "none",
   };
 }
 
@@ -205,7 +187,7 @@ function normalize(plan: CarouselPlan, photoCount: number): CarouselPlan {
     slides,
     palette: cleanPalette(plan.palette),
     hookOptions: [...plan.hookOptions].sort((a, b) => b.score - a.score),
-    hashtags: plan.hashtags.map((h) => "#" + h.replace(/^#+/, "").replace(/\s+/g, "")),
+    hashtags: cleanHashtags(plan.hashtags),
   };
 }
 
@@ -246,7 +228,17 @@ export async function regenerateSlide(
   index: number,
   instruction?: string,
 ): Promise<Slide> {
-  const { role, imageIndex } = plan.slides[index];
+  const { role, imageIndex, imageQuery, imageKind } = plan.slides[index];
   const slide = await callModel(buildRegenerateSlidePrompt(input, plan, index, instruction), SlideSchema);
-  return { ...cleanSlide(slide, Infinity), role, imageIndex };
+  return { ...cleanSlide(slide, Infinity), role, imageIndex, imageQuery, imageKind };
+}
+
+// Changes only the parts of the post the instruction asks for.
+export async function editPost(req: EditPostRequest): Promise<PostEdit> {
+  const output = await callModel(buildEditPostPrompt(req), PostEditOutputSchema);
+  return normalizeEdit(output, {
+    slideCount: req.plan.slides.length,
+    uploadCount: req.uploads.length,
+    brand: req.brand,
+  });
 }

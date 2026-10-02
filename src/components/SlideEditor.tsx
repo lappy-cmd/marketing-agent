@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { StudioPhoto } from "@/lib/photos";
-import type { CarouselPlan, Slide } from "@/lib/schemas";
+import { creditText, type StudioPhoto } from "@/lib/photos";
+import type { CarouselPlan, ImageCandidate, ImageSources, Slide } from "@/lib/schemas";
+import { ImagePicker } from "./ImagePicker";
 import { Button, Field, Input, Spinner, Textarea } from "./ui";
 
 const ROLE_LABELS: Record<Slide["role"], string> = { hook: "Cover", value: "Content", cta: "Call to action" };
@@ -14,25 +15,31 @@ export function SlideEditor({
   hookOptions,
   photos,
   photoId,
+  sources,
   regenerating,
   onChange,
   onPhotoChange,
+  onPickImage,
   onRegenerate,
 }: {
   slide: Slide;
   index: number;
   hookOptions: CarouselPlan["hookOptions"];
+  // Uploads plus the images found online for this slide.
   photos: StudioPhoto[];
   photoId: string | null;
+  sources: ImageSources;
   regenerating: boolean;
   onChange: (next: Slide) => void;
   onPhotoChange: (photoId: string | null) => void;
+  onPickImage: (candidate: ImageCandidate, query: string) => Promise<void>;
   onRegenerate: (instruction?: string) => void;
 }) {
   const [instruction, setInstruction] = useState("");
   const [chipsText, setChipsText] = useState(slide.chips.join(", "));
   const set = <K extends keyof Slide>(key: K, v: Slide[K]) => onChange({ ...slide, [key]: v });
   const words = slide.headline.trim().split(/\s+/).filter(Boolean).length;
+  const current = photos.find((p) => p.id === photoId);
 
   return (
     <div className="flex flex-col gap-4">
@@ -57,18 +64,39 @@ export function SlideEditor({
                 key={p.id}
                 type="button"
                 onClick={() => onPhotoChange(p.id)}
-                title={p.label}
-                className={`h-12 w-12 overflow-hidden rounded-md ring-2 ring-offset-1 transition ${
+                title={p.credit ? `${p.label} (${creditText(p)})` : p.label}
+                className={`relative h-12 w-12 overflow-hidden rounded-md ring-2 ring-offset-1 transition ${
                   photoId === p.id ? "ring-zinc-900" : "ring-transparent opacity-70 hover:opacity-100"
                 }`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={p.dataUrl} alt={p.label} className="h-full w-full object-cover" />
+                {p.origin !== "upload" ? (
+                  <span className="absolute right-0 bottom-0 rounded-tl bg-black/70 px-1 text-[8px] font-medium text-white uppercase">
+                    {p.origin}
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
         </Field>
       ) : null}
+
+      {current?.credit ? (
+        <p className="-mt-2 text-xs text-zinc-500">
+          Image:{" "}
+          <a href={current.credit.pageUrl} target="_blank" rel="noreferrer" className="underline hover:text-zinc-800">
+            {creditText(current)}
+          </a>
+        </p>
+      ) : null}
+
+      <ImagePicker
+        defaultQuery={slide.imageQuery || slide.headline}
+        defaultKind={slide.imageKind === "web" ? "web" : "stock"}
+        sources={sources}
+        onPick={onPickImage}
+      />
 
       <div className="grid grid-cols-[1fr_80px] gap-3">
         <Field label={KICKER_LABELS[slide.role]}>

@@ -1,4 +1,6 @@
-// Browser-only helpers for user photos.
+// Browser-only helpers for user photos and images found online.
+import { downloadImage } from "./client-api";
+import type { ImageCandidate, ImageSource } from "./schemas";
 
 export interface StudioPhoto {
   id: string;
@@ -6,6 +8,10 @@ export interface StudioPhoto {
   width: number;
   height: number;
   label: string;
+  origin: "upload" | ImageSource;
+  // Found images only: where it came from, and the slide it was found for.
+  credit?: Pick<ImageCandidate, "sourceName" | "author" | "pageUrl">;
+  slideIndex?: number;
 }
 
 // Slides are 1080px wide, so anything larger only costs upload time and
@@ -13,12 +19,12 @@ export interface StudioPhoto {
 const MAX_SIDE = 1080;
 const QUALITY = 0.85;
 
-export async function loadPhoto(file: File): Promise<StudioPhoto> {
+async function downscale(source: Blob, name: string): Promise<Pick<StudioPhoto, "id" | "dataUrl" | "width" | "height">> {
   let bitmap: ImageBitmap;
   try {
-    bitmap = await createImageBitmap(file);
+    bitmap = await createImageBitmap(source);
   } catch {
-    throw new Error(`Couldn't read ${file.name}. Use a JPG, PNG or WebP image.`);
+    throw new Error(`Couldn't read ${name}. Use a JPG, PNG or WebP image.`);
   }
   const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
   const width = Math.round(bitmap.width * scale);
@@ -36,8 +42,29 @@ export async function loadPhoto(file: File): Promise<StudioPhoto> {
     dataUrl: canvas.toDataURL("image/jpeg", QUALITY),
     width,
     height,
-    label: labelFromFilename(file.name),
   };
+}
+
+export async function loadPhoto(file: File): Promise<StudioPhoto> {
+  return { ...(await downscale(file, file.name)), label: labelFromFilename(file.name), origin: "upload" };
+}
+
+// Imports an image found online for one slide.
+export async function importImage(candidate: ImageCandidate, slideIndex: number, label: string): Promise<StudioPhoto> {
+  const { sourceName, author, pageUrl } = candidate;
+  return {
+    ...(await downscale(await downloadImage(candidate.url), "that image")),
+    label,
+    origin: candidate.kind,
+    credit: { sourceName, author, pageUrl },
+    slideIndex,
+  };
+}
+
+export function creditText(photo: StudioPhoto): string {
+  if (!photo.credit) return "";
+  const { author, sourceName } = photo.credit;
+  return author ? `${author} / ${sourceName}` : sourceName;
 }
 
 // "myburgerlab-classic.jpg" is a useful hint for the AI; "IMG_2034.jpg" isn't.
